@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据文件（运行时生成）
+data/
+accounts_data/
+media/
+*.db
+
+# 环境变量（包含敏感信息）
+.env
+.env.local
+.env.*.local
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+nul
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 文档
+*.md
+!README.md

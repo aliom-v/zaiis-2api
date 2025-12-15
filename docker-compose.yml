@@ -1,0 +1,28 @@
+services:
+  zai-2api:
+    build: .
+    container_name: zai-2api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - API_MASTER_KEY=${API_MASTER_KEY:-}
+      - PORT=8000
+      - DB_PATH=/app/data/zai.db
+    volumes:
+      # 数据持久化
+      - ./data:/app/data
+      - ./accounts_data:/app/accounts_data
+      - ./media:/app/media
+    # 如果需要显示浏览器界面（用于首次登录），取消下面的注释
+    # 注意：需要在宿主机上配置 X11 转发
+    # environment:
+    #   - DISPLAY=${DISPLAY}
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

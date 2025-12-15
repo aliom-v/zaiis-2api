@@ -3,10 +3,11 @@
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-green?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Playwright](https://img.shields.io/badge/Playwright-1.40+-orange?logo=playwright&logoColor=white)](https://playwright.dev/)
+[![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-purple?logo=openai&logoColor=white)](https://platform.openai.com/)
 [![License Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue)](https://opensource.org/licenses/Apache-2.0)
 
-> **🌐 GitHub 仓库**: [https://github.com/lza6/zai.is-2api-python](https://github.com/lza6/zai.is-2api-python)
+> **🌐 GitHub 仓库**: [https://github.com/aliom-v/zaiis-2api](https://github.com/aliom-v/zaiis-2api)
 
 ---
 
@@ -89,28 +90,70 @@ graph TB
 
 ---
 
-## 🚀 快速开始 (5 分钟部署)
+## 🚀 快速开始
 
-### 1️⃣ 环境准备
+### 方式一：Docker Compose 部署（推荐）
+
+最简单的部署方式，一键启动：
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/aliom-v/zaiis-2api.git
+cd zaiis-2api
+
+# 2. 启动服务
+docker-compose up -d
+
+# 3. 查看日志
+docker-compose logs -f
+```
+
+**配置环境变量**（可选）：
+```bash
+# 创建 .env 文件
+echo "API_MASTER_KEY=your_secret_key" > .env
+echo "PORT=8000" >> .env
+
+# 重新启动
+docker-compose up -d
+```
+
+**常用命令**：
+```bash
+# 停止服务
+docker-compose down
+
+# 重新构建
+docker-compose build --no-cache
+
+# 查看状态
+docker-compose ps
+```
+
+---
+
+### 方式二：传统部署
+
+#### 1️⃣ 环境准备
 确保你的系统已安装 **Python 3.9+**：
 ```bash
 python --version
 # Python 3.11.0 或更高版本
 ```
 
-### 2️⃣ 获取项目
+#### 2️⃣ 获取项目
 **方法 A：Git 克隆（推荐）**
 ```bash
-git clone https://github.com/lza6/zai.is-2api-python.git
-cd zai.is-2api-python
+git clone https://github.com/aliom-v/zaiis-2api.git
+cd zaiis-2api
 ```
 
 **方法 B：直接下载**
-1. 访问 [GitHub 仓库](https://github.com/lza6/zai.is-2api-python)
+1. 访问 [GitHub 仓库](https://github.com/aliom-v/zaiis-2api)
 2. 点击 `Code` → `Download ZIP`
 3. 解压到本地目录
 
-### 3️⃣ 一键安装
+#### 3️⃣ 一键安装
 在项目根目录运行：
 ```bash
 # 安装 Python 依赖
@@ -120,7 +163,7 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 4️⃣ 启动服务
+#### 4️⃣ 启动服务
 **Windows 用户：**
 - 双击 `start.bat` 文件
 - 或命令行运行：`python main.py`
@@ -130,12 +173,12 @@ playwright install chromium
 python main.py
 ```
 
-### 5️⃣ 首次配置
+#### 5️⃣ 首次配置
 1. 打开浏览器访问：`http://localhost:8000`
 2. 点击 **"🌐 启动浏览器登录"** 按钮
 3. 在弹出的浏览器窗口中完成 Discord 登录
 4. 登录成功后关闭浏览器，Token 自动保存
-5. 现在可以开始使用 API 了！🎉
+5. 现在可以开始使用 API 了！
 
 ---
 
@@ -446,7 +489,7 @@ gantt
 我们欢迎各种形式的贡献！🎉
 
 ### 🐛 报告 Bug
-1. 在 [GitHub Issues](https://github.com/lza6/zai.is-2api-python/issues) 查看是否已有相关报告
+1. 在 [GitHub Issues](https://github.com/aliom-v/zaiis-2api/issues) 查看是否已有相关报告
 2. 创建新的 Issue，描述详细复现步骤
 3. 包括：环境信息、错误日志、期望行为
 
@@ -522,7 +565,7 @@ gantt
 
 | 渠道 | 用途 | 响应时间 |
 |------|------|----------|
-| [GitHub Issues](https://github.com/lza6/zai.is-2api-python/issues) | Bug 报告、功能建议 | 1-3 天 |
+| [GitHub Issues](https://github.com/aliom-v/zaiis-2api/issues) | Bug 报告、功能建议 | 1-3 天 |
 | GitHub Discussions | 技术讨论、使用交流 | 1-2 天 |
 | 项目 Wiki | 详细文档、教程 | 持续更新 |
 | Discord 社区 | 实时交流、快速帮助 | 即时 |
@@ -533,10 +576,10 @@ gantt
 
 <div align="center">
 
-![GitHub Stars](https://img.shields.io/github/stars/lza6/zai.is-2api-python?style=for-the-badge&logo=github)
-![GitHub Forks](https://img.shields.io/github/forks/lza6/zai.is-2api-python?style=for-the-badge&logo=github)
-![GitHub Issues](https://img.shields.io/github/issues/lza6/zai.is-2api-python?style=for-the-badge&logo=github)
-![GitHub License](https://img.shields.io/github/license/lza6/zai.is-2api-python?style=for-the-badge&logo=github)
+![GitHub Stars](https://img.shields.io/github/stars/aliom-v/zaiis-2api?style=for-the-badge&logo=github)
+![GitHub Forks](https://img.shields.io/github/forks/aliom-v/zaiis-2api?style=for-the-badge&logo=github)
+![GitHub Issues](https://img.shields.io/github/issues/aliom-v/zaiis-2api?style=for-the-badge&logo=github)
+![GitHub License](https://img.shields.io/github/license/aliom-v/zaiis-2api?style=for-the-badge&logo=github)
 
 **最后更新：** 2025年12月11日 23:00:24
 **活跃状态：** 🟢 积极维护  
@@ -546,7 +589,7 @@ gantt
 
 ---
 
-> **💖 Made with passion and countless cups of coffee by [lza6](https://github.com/lza6)**  
+> **💖 Made with passion and countless cups of coffee by [aliom](https://github.com/aliom-v)**  
 > *If this project helps you, please give it a ⭐ on GitHub!*
 
 ---

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Data files (keep structure, ignore content)
+data/zai.db
+accounts_data/acc_*/
+zai_user_data/*.json
+zai_user_data/*.har
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Temp files
+*.tmp
+*.temp
