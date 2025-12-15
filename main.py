@@ -1,129 +1,89 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Zai-2API: 将 Zai.is 转换为 OpenAI 兼容 API 的代理服务
+"""
+
 import asyncio
-import time
+import json
 import os
-import secrets
-import base64
-from datetime import timedelta, datetime
+import time
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Depends, Header, HTTPException, Form
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, RedirectResponse
+from datetime import datetime
+
+import httpx
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from loguru import logger
+
 from app.core.config import settings
 from app.core.db_manager import db_manager
+from app.core.errors import (
+    APIError,
+    NoAvailableAccountError,
+    api_error_handler,
+    create_error_response,
+    create_success_response,
+)
+from app.core.http_client import http_client_manager
+from app.core.rate_limit import RateLimitMiddleware
 from app.providers.zai_provider import ZaiProvider
 from app.utils.har_parser import extract_token_from_text
+from app.utils.image_manager import image_manager
 from app.utils.token_auto_refresh_service import auto_refresh_service
-
-# 图片管理类
-class ImageManager:
-    def __init__(self):
-        self.media_dir = "media"
-        if not os.path.exists(self.media_dir):
-            os.makedirs(self.media_dir)
-        self.cleanup_task = None
-
-    def start_cleanup_task(self):
-        """启动定时清理任务"""
-        if self.cleanup_task is None:
-            # 仅在事件循环运行时启动清理任务
-            try:
-                self.cleanup_task = asyncio.create_task(self.cleanup_old_images())
-            except RuntimeError:
-                # 如果没有运行的事件循环，记录下来稍后处理
-                logger.warning("没有运行的事件循环，稍后启动清理任务")
-
-    async def cleanup_old_images(self):
-        """定期清理30分钟前的图片"""
-        while True:
-            try:
-                await asyncio.sleep(60 * 30)  # 每30分钟检查一次
-                now = datetime.now()
-                for filename in os.listdir(self.media_dir):
-                    file_path = os.path.join(self.media_dir, filename)
-                    if os.path.isfile(file_path):
-                        file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-                        if now - file_time > timedelta(minutes=30):
-                            try:
-                                os.remove(file_path)
-                            except Exception as e:
-                                logger.error(f"删除旧图片失败 {file_path}: {e}")
-            except Exception as e:
-                logger.error(f"清理图片任务出错: {e}")
-
-    def save_base64_image(self, base64_data: str) -> str:
-        """保存base64图片并返回文件名"""
-        # 移除base64前缀
-        if base64_data.startswith('data:image'):
-            header, base64_data = base64_data.split(',', 1)
-            # 根据图片类型确定扩展名
-            if 'jpeg' in header or 'jpg' in header:
-                ext = 'jpg'
-            elif 'png' in header:
-                ext = 'png'
-            elif 'gif' in header:
-                ext = 'gif'
-            elif 'webp' in header:
-                ext = 'webp'
-            else:
-                ext = 'png'  # 默认为png
-        else:
-            ext = 'png'  # 默认为png
-
-        # 生成唯一文件名
-        filename = f"{secrets.token_urlsafe(16)}.{ext}"
-        filepath = os.path.join(self.media_dir, filename)
-
-        # 解码并保存图片
-        image_data = base64.b64decode(base64_data)
-        with open(filepath, 'wb') as f:
-            f.write(image_data)
-
-        return filename
-
-    def get_image_path(self, filename: str) -> str:
-        """获取图片完整路径"""
-        return os.path.join(self.media_dir, filename)
-
-image_manager = ImageManager()
 
 # --- 全局 Provider ---
 provider = ZaiProvider()
 
+# --- 启动时间 ---
+_start_time = time.time()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
-    
+
     # 1. 启动时检查过期 Token
     asyncio.create_task(perform_breakpoint_update())
-    
+
     # 2. 启动自动刷新服务
     asyncio.create_task(auto_refresh_service.start())
-    
+
     # 3. 启动图片管理清理任务
     image_manager.start_cleanup_task()
-    
+
     logger.info(f"🌐 服务地址: http://localhost:{settings.PORT}")
     yield
-    
-    # 3. 停止服务
+
+    # 停止服务
     auto_refresh_service.stop()
+    await http_client_manager.close()
     logger.info("🛑 服务已停止")
 
-app = FastAPI(lifespan=lifespan, title=settings.APP_NAME)
-templates = Jinja2Templates(directory="templates")
 
-# 挂载静态文件目录（用于图片等资源）
-import os
-import secrets
-from datetime import timedelta
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, RedirectResponse
-import httpx
-import urllib.parse
+app = FastAPI(
+    lifespan=lifespan,
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description="将 Zai.is 转换为 OpenAI 兼容 API 的代理服务",
+)
+
+# 添加限流中间件
+app.add_middleware(RateLimitMiddleware)
+
+# 添加错误处理器
+app.add_exception_handler(APIError, api_error_handler)
+
+templates = Jinja2Templates(directory="templates")
 
 # 创建静态文件目录（如果不存在）
 static_dir = os.path.join(os.getcwd(), "static")
@@ -261,6 +221,190 @@ async def clear_logs():
     db_manager.clear_logs()
     return RedirectResponse("/", status_code=303)
 
+# --- API 路由 (Anthropic 兼容 - 用于 Claude Code CLI) ---
+@app.post("/v1/messages", dependencies=[Depends(verify_api_key)])
+async def anthropic_messages(request: Request):
+    """
+    Anthropic Messages API 兼容端点
+    支持 Claude Code CLI 等使用 Anthropic API 格式的客户端
+    """
+    start_time = time.time()
+    try:
+        request_data = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    model = request_data.get("model", "claude-sonnet-4-5-20250929")
+    messages = request_data.get("messages", [])
+    stream = request_data.get("stream", False)
+    max_tokens = request_data.get("max_tokens", 4096)
+
+    # 模型名称映射：Anthropic 模型名 -> Zai 模型名
+    model_mapping = {
+        # Claude 4 系列
+        "claude-opus-4-20250514": "claude-opus-4-20250514",
+        "claude-sonnet-4-20250514": "claude-sonnet-4-20250514",
+        "claude-sonnet-4-5-20250929": "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
+        # Claude 3.5 系列 -> 映射到 Claude 4
+        "claude-3-5-sonnet-20241022": "claude-sonnet-4-5-20250929",
+        "claude-3-5-sonnet-latest": "claude-sonnet-4-5-20250929",
+        "claude-3-5-haiku-20241022": "claude-haiku-4-5-20251001",
+        "claude-3-5-haiku-latest": "claude-haiku-4-5-20251001",
+        # Claude 3 系列 -> 映射到 Claude 4
+        "claude-3-opus-20240229": "claude-opus-4-20250514",
+        "claude-3-opus-latest": "claude-opus-4-20250514",
+        "claude-3-sonnet-20240229": "claude-sonnet-4-20250514",
+        "claude-3-haiku-20240307": "claude-haiku-4-5-20251001",
+        # 通用别名
+        "opus": "claude-opus-4-20250514",
+        "sonnet": "claude-sonnet-4-5-20250929",
+        "haiku": "claude-haiku-4-5-20251001",
+    }
+
+    # 映射模型名称
+    zai_model = model_mapping.get(model, model)
+
+    accounts = db_manager.get_all_accounts(active_only=True)
+    if not accounts:
+        raise HTTPException(status_code=503, detail="没有可用账号")
+
+    # 转换为 OpenAI 格式的请求
+    openai_request = {
+        "model": zai_model,
+        "messages": messages,
+        "stream": True,  # 内部始终使用流式
+        "max_tokens": max_tokens
+    }
+
+    for account in accounts:
+        try:
+            if stream:
+                # 流式响应 - Anthropic SSE 格式
+                async def anthropic_stream_generator():
+                    import uuid
+                    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+                    input_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+                    output_tokens = 0
+
+                    # message_start 事件
+                    message_start = {
+                        "type": "message_start",
+                        "message": {
+                            "id": msg_id,
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                            "model": model,
+                            "stop_reason": None,
+                            "stop_sequence": None,
+                            "usage": {"input_tokens": input_tokens, "output_tokens": 0}
+                        }
+                    }
+                    yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+
+                    # content_block_start 事件
+                    content_block_start = {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""}
+                    }
+                    yield f"event: content_block_start\ndata: {json.dumps(content_block_start)}\n\n"
+
+                    # 调用 ZaiProvider 获取响应
+                    full_content = ""
+                    async for chunk in provider.chat_completion(openai_request, account["token"]):
+                        if chunk.startswith("data: "):
+                            data_str = chunk[6:].strip()
+                            if data_str == "[DONE]":
+                                continue
+                            try:
+                                chunk_data = json.loads(data_str)
+                                if "choices" in chunk_data and chunk_data["choices"]:
+                                    delta = chunk_data["choices"][0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    if content:
+                                        full_content += content
+                                        output_tokens += len(content) // 4
+                                        # content_block_delta 事件
+                                        content_delta = {
+                                            "type": "content_block_delta",
+                                            "index": 0,
+                                            "delta": {"type": "text_delta", "text": content}
+                                        }
+                                        yield f"event: content_block_delta\ndata: {json.dumps(content_delta)}\n\n"
+                            except json.JSONDecodeError:
+                                pass
+
+                    # content_block_stop 事件
+                    content_block_stop = {"type": "content_block_stop", "index": 0}
+                    yield f"event: content_block_stop\ndata: {json.dumps(content_block_stop)}\n\n"
+
+                    # message_delta 事件
+                    message_delta = {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                        "usage": {"output_tokens": max(output_tokens, 1)}
+                    }
+                    yield f"event: message_delta\ndata: {json.dumps(message_delta)}\n\n"
+
+                    # message_stop 事件
+                    yield f"event: message_stop\ndata: {{\"type\": \"message_stop\"}}\n\n"
+
+                duration = int((time.time() - start_time) * 1000)
+                db_manager.add_log(account["name"], zai_model, "SUCCESS", duration)
+                return StreamingResponse(anthropic_stream_generator(), media_type="text/event-stream")
+
+            else:
+                # 非流式响应
+                import uuid
+                msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+                full_content = ""
+
+                async for chunk in provider.chat_completion(openai_request, account["token"]):
+                    if chunk.startswith("data: "):
+                        data_str = chunk[6:].strip()
+                        if data_str == "[DONE]":
+                            continue
+                        try:
+                            chunk_data = json.loads(data_str)
+                            if "choices" in chunk_data and chunk_data["choices"]:
+                                delta = chunk_data["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    full_content += content
+                        except json.JSONDecodeError:
+                            pass
+
+                input_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+                output_tokens = len(full_content) // 4
+
+                response = {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": full_content}],
+                    "model": model,
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": max(output_tokens, 1)
+                    }
+                }
+
+                duration = int((time.time() - start_time) * 1000)
+                db_manager.add_log(account["name"], zai_model, "SUCCESS", duration)
+                return JSONResponse(response)
+
+        except Exception as e:
+            logger.error(f"账号 {account['name']} 失败: {e}")
+            db_manager.add_log(account["name"], zai_model, "ERROR", int((time.time() - start_time) * 1000))
+            continue
+
+    raise HTTPException(status_code=503, detail="所有账号均调用失败")
+
+
 # --- API 路由 (OpenAI 兼容) ---
 @app.post("/v1/chat/completions", dependencies=[Depends(verify_api_key)])
 async def chat_completions(request: Request):
@@ -269,19 +413,22 @@ async def chat_completions(request: Request):
         request_data = await request.json()
     except:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-        
+
     model = request_data.get("model", settings.DEFAULT_MODEL)
-    accounts = db_manager.get_all_accounts(active_only=True)
-    
-    if not accounts:
-        raise HTTPException(status_code=503, detail="没有可用账号")
-    
-    for account in accounts:
+
+    # 使用负载均衡获取账号（最多重试3次）
+    max_retries = 3
+    for attempt in range(max_retries):
+        account = db_manager.get_next_account(strategy="round_robin")
+
+        if not account:
+            raise HTTPException(status_code=503, detail="没有可用账号")
+
         try:
-            # 直接使用 Token 请求
             response_generator = provider.chat_completion(request_data, account["token"])
-            
-            # 记录日志
+
+            # 更新统计
+            db_manager.update_stats(account["id"])
             duration = int((time.time() - start_time) * 1000)
             db_manager.add_log(account["name"], model, "SUCCESS", duration)
             
@@ -294,50 +441,24 @@ async def chat_completions(request: Request):
     raise HTTPException(status_code=503, detail="所有账号均调用失败")
 
 @app.get("/v1/models")
-
 async def list_models():
-
     """返回所有支持的模型列表"""
-
     models = [
-
         {"id": "gemini-3-pro-image-preview", "object": "model", "owned_by": "zai", "name": "Nano Banana Pro"},
-
         {"id": "gemini-2.5-pro", "object": "model", "owned_by": "zai", "name": "Gemini 2.5 Pro"},
-
         {"id": "claude-opus-4-20250514", "object": "model", "owned_by": "zai", "name": "Claude Opus 4"},
-
         {"id": "claude-sonnet-4-5-20250929", "object": "model", "owned_by": "zai", "name": "Claude Sonnet 4.5"},
-
         {"id": "claude-sonnet-4-20250514", "object": "model", "owned_by": "zai", "name": "Claude Sonnet 4"},
-
         {"id": "claude-haiku-4-5-20251001", "object": "model", "owned_by": "zai", "name": "Claude Haiku 4.5"},
-
         {"id": "o1-2024-12-17", "object": "model", "owned_by": "zai", "name": "o1"},
-
         {"id": "o3-pro-2025-06-10", "object": "model", "owned_by": "zai", "name": "o3-pro"},
-
         {"id": "grok-4-1-fast-reasoning", "object": "model", "owned_by": "zai", "name": "Grok 4.1 Fast"},
-
         {"id": "grok-4-0709", "object": "model", "owned_by": "zai", "name": "Grok 4"},
-
         {"id": "o4-mini-2025-04-16", "object": "model", "owned_by": "zai", "name": "o4-mini"},
-
         {"id": "gpt-5-2025-08-07", "object": "model", "owned_by": "zai", "name": "GPT-5"},
-
-        {"id": "gemini-2.5-flash-image", "object": "model", "owned_by": "zai", "name": "Nano Banana"}
-
+        {"id": "gemini-2.5-flash-image", "object": "model", "owned_by": "zai", "name": "Nano Banana"},
     ]
-
-    
-
-    return {
-
-        "object": "list", 
-
-        "data": models
-
-    }
+    return {"object": "list", "data": models}
 
 # --- 刷新控制 ---
 @app.post("/api/token/refresh/{account_id}")
@@ -379,7 +500,7 @@ async def get_account_status():
     """获取所有账号的Token有效性状态"""
     accounts = db_manager.get_all_accounts()
     status_list = []
-    
+
     for account in accounts:
         is_valid = provider.verify_token(account['token']) if account.get('token') else False
         status_list.append({
@@ -392,8 +513,68 @@ async def get_account_status():
             "expires_at": account.get('expires_at'),
             "data_dir": account.get('data_dir')
         })
-    
+
     return JSONResponse({"accounts": status_list})
+
+
+@app.get("/api/stats")
+async def get_stats():
+    """获取系统统计信息"""
+    stats = db_manager.get_stats()
+    return JSONResponse(stats)
+
+
+# --- 健康检查 ---
+@app.get("/health")
+async def health_check():
+    """
+    健康检查端点 - 用于 Docker/K8s 探针
+
+    返回:
+        - status: 服务状态 (healthy/degraded/unhealthy)
+        - uptime: 运行时间（秒）
+        - accounts: 可用账号数
+        - version: 版本号
+    """
+    stats = db_manager.get_stats()
+    uptime = int(time.time() - _start_time)
+
+    # 判断健康状态
+    if stats["active_accounts"] > 0:
+        status = "healthy"
+    elif stats["total_accounts"] > 0:
+        status = "degraded"
+    else:
+        status = "unhealthy"
+
+    return JSONResponse({
+        "status": status,
+        "uptime": uptime,
+        "version": settings.APP_VERSION,
+        "accounts": {
+            "active": stats["active_accounts"],
+            "total": stats["total_accounts"],
+        },
+        "config": {
+            "rate_limit_enabled": settings.RATE_LIMIT_ENABLED,
+            "load_balance_strategy": settings.LOAD_BALANCE_STRATEGY,
+        },
+    })
+
+
+@app.get("/health/live")
+async def liveness_probe():
+    """存活探针 - 检查服务是否运行"""
+    return JSONResponse({"status": "alive"})
+
+
+@app.get("/health/ready")
+async def readiness_probe():
+    """就绪探针 - 检查服务是否可以接收请求"""
+    stats = db_manager.get_stats()
+    if stats["active_accounts"] > 0:
+        return JSONResponse({"status": "ready"})
+    return JSONResponse({"status": "not_ready"}, status_code=503)
 
 # --- 辅助函数 ---
 @app.post("/api/service/stop")
@@ -415,7 +596,6 @@ async def stop_service():
 
 async def perform_breakpoint_update():
     """启动时检查过期 Token"""
-    from datetime import datetime
     try:
         accounts = db_manager.get_all_accounts(active_only=True)
         browser_accounts = [acc for acc in accounts if acc['token_source'] == 'browser']

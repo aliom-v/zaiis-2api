@@ -11,10 +11,10 @@ from app.core.db_manager import db_manager
 class TokenAutoRefreshService:
     def __init__(self):
         self.is_running = False
-        self.refresh_interval = 3600
+        self.refresh_interval = settings.TOKEN_REFRESH_INTERVAL
         self.preview_mode = False
-        self.token_valid_duration = 10800
-        self.refresh_threshold = 3600
+        self.token_valid_duration = settings.TOKEN_VALID_DURATION
+        self.refresh_threshold = settings.TOKEN_REFRESH_THRESHOLD
         
     async def start(self):
         if self.is_running: return
